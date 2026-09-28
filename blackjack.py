@@ -4,9 +4,11 @@
     python3 blackjack.py                  # умный дилер, 6 колод, банк 1000
     python3 blackjack.py --dealer s17     # дилер по правилам казино
     python3 blackjack.py --hints          # совет на каждом ходу
+    python3 blackjack.py --hint-style odds  # вид совета: words, odds или ev
     python3 blackjack.py --help           # все настройки
 
-Управление: H — ещё, S — хватит, D — удвоить, P — разделить, ? — совет, Q — выход.
+Управление: H — ещё, S — хватит, D — удвоить, P — разделить, ? — совет,
+T — вид совета, Q — выход.
 Клавиши работают и в русской раскладке. Зависимостей нет, нужен Python 3.9+.
 """
 
@@ -179,8 +181,38 @@ def smart_dealer_hits(hard: int, has_ace: bool, live, counts) -> bool:
 
 # ─── Советчик ────────────────────────────────────────────────────────────
 
-def advise(hand: Hand, up: Card, mode: str, counts, actions) -> dict[str, float]:
-    """Средний результат каждого действия в долях ставки (+0.1 — это +10 %).
+class Odds(NamedTuple):
+    """Оценка хода: средний результат в долях ставки (+0.1 — это +10 %)
+    и шансы выиграть, сыграть вничью и проиграть раздачу."""
+    ev: float
+    win: float
+    push: float
+    lose: float
+
+
+WIN, PUSH, LOSE = Odds(1, 1, 0, 0), Odds(0, 0, 1, 0), Odds(-1, 0, 0, 1)
+
+
+def mix(parts) -> Odds:
+    """Среднее оценок с весами: parts — пары (вероятность, Odds)."""
+    total = [0.0] * 4
+    for q, odds in parts:
+        for k in range(4):
+            total[k] += q * odds[k]
+    return Odds(*total)
+
+
+def better(*options: Odds) -> Odds:
+    return max(options, key=lambda odds: odds.ev)
+
+
+def doubled(odds: Odds) -> Odds:
+    """Две ставки на кону: средний результат вдвое больше, шансы те же."""
+    return odds._replace(ev=2 * odds.ev)
+
+
+def advise(hand: Hand, up: Card, mode: str, counts, actions) -> dict[str, Odds]:
+    """Оценка каждого действия при лучшей дальнейшей игре.
 
     Считается для текущей руки так, будто она одна, по составу оставшегося
     шуза, но без учёта того, что карты уходят по ходу раздачи."""
@@ -192,55 +224,55 @@ def advise(hand: Hand, up: Card, mode: str, counts, actions) -> dict[str, float]
     hole = [q / sum(hole) for q in hole]
 
     @lru_cache(maxsize=None)
-    def dealer_plays(hard, has_ace, t):
-        """Результат игрока с суммой t, пока дилер доигрывает свою руку."""
+    def dealer_plays(hard, has_ace, t) -> Odds:
+        """Исход для игрока с суммой t, пока дилер доигрывает свою руку."""
         total = best_total(hard, has_ace)
-        now = (t > total) - (t < total)
+        now = WIN if t > total else PUSH if t == total else LOSE
         if mode == "smart":
             done = total == 21
         else:
             done = total > 17 or total == 17 and not (mode == "h17" and total != hard)
         if done:
             return now
-        hit = sum(q * (1 if hard + i + 1 > 21 else dealer_plays(hard + i + 1, has_ace or i == 0, t))
+        hit = mix((q, WIN if hard + i + 1 > 21 else dealer_plays(hard + i + 1, has_ace or i == 0, t))
                   for i, q in enumerate(p) if q)
-        return min(now, hit) if mode == "smart" else hit
+        return min(now, hit, key=lambda odds: odds.ev) if mode == "smart" else hit
 
     @lru_cache(maxsize=None)
-    def stand_ev(t):
-        return sum(q * dealer_plays(up.value + i + 1, up.value == 1 or i == 0, t)
+    def stand_at(t) -> Odds:
+        return mix((q, dealer_plays(up.value + i + 1, up.value == 1 or i == 0, t))
                    for i, q in enumerate(hole) if q)
 
     def stand_on(hard, has_ace):
-        return stand_ev(best_total(hard, has_ace))
+        return stand_at(best_total(hard, has_ace))
 
     def after_card(hard, has_ace, then):
-        """Средний результат после ещё одной карты; перебор — минус ставка."""
-        return sum(q * (-1 if hard + i + 1 > 21 else then(hard + i + 1, has_ace or i == 0))
+        """Исход после ещё одной карты; перебор — проигрыш."""
+        return mix((q, LOSE if hard + i + 1 > 21 else then(hard + i + 1, has_ace or i == 0))
                    for i, q in enumerate(p) if q)
 
     @lru_cache(maxsize=None)
     def play_on(hard, has_ace):
-        """Лучший результат, если дальше можно и брать, и остановиться."""
+        """Лучший исход, если дальше можно и брать, и остановиться."""
         now = stand_on(hard, has_ace)
         if best_total(hard, has_ace) == 21:
             return now
-        return max(now, after_card(hard, has_ace, play_on))
+        return better(now, after_card(hard, has_ace, play_on))
 
     def double_on(hard, has_ace):
-        return 2 * after_card(hard, has_ace, stand_on)
+        return doubled(after_card(hard, has_ace, stand_on))
 
-    ev = {"h": after_card(hand.hard, hand.has_ace, play_on), "s": stand_on(hand.hard, hand.has_ace)}
+    odds = {"h": after_card(hand.hard, hand.has_ace, play_on), "s": stand_on(hand.hard, hand.has_ace)}
     if "d" in actions:
-        ev["d"] = double_on(hand.hard, hand.has_ace)
+        odds["d"] = double_on(hand.hard, hand.has_ace)
     if "p" in actions:
         value = hand.cards[0].value
         if value == 1:  # тузы после сплита получают по одной карте
             one = after_card(1, True, stand_on)
         else:
-            one = after_card(value, False, lambda h, a: max(play_on(h, a), double_on(h, a)))
-        ev["p"] = 2 * one
-    return ev
+            one = after_card(value, False, lambda h, a: better(play_on(h, a), double_on(h, a)))
+        odds["p"] = doubled(one)  # две руки — две ставки; шансы — для каждой руки
+    return odds
 
 
 # ─── Игра ────────────────────────────────────────────────────────────────
@@ -366,6 +398,7 @@ class Game:
 
 COLOR = sys.stdout.isatty() and "NO_COLOR" not in os.environ
 BOLD, DIM, RED, GREEN, YELLOW, BLUE, CYAN = "1", "2", "31", "32", "33", "34", "36"
+ORANGE = "38;5;215"
 
 ACTIONS = {"h": "ещё", "s": "хватит", "d": "удвоить", "p": "разделить"}
 OUTCOMES = {
@@ -373,6 +406,13 @@ OUTCOMES = {
     "win": ("победа", GREEN),
     "push": ("ничья", YELLOW),
     "lose": ("проигрыш", RED),
+}
+
+# Виды совета: название, подпись перед оценками, описание для стартового экрана
+HINT_STYLES = {
+    "words": ("словами", "оценка:", "«лучший», «тоже ок», «хуже» или «ошибка»"),
+    "odds": ("шансы", "шанс выиграть:", "вероятность выиграть раздачу, если сыграть так"),
+    "ev": ("матожидание", "матожидание, фишек:", "сколько фишек ход приносит в среднем"),
 }
 
 
@@ -397,6 +437,24 @@ def chips(x) -> str:
     if not round(x, digits):
         return paint("0", DIM)
     return paint(f"{x:+.{digits}f}".replace("-", "−"), GREEN if x > 0 else RED)
+
+
+def rating(odds: dict[str, Odds], action: str, style: str, bet) -> str:
+    """Оценка хода в выбранном виде совета."""
+    best = max(odds, key=lambda a: odds[a].ev)
+    if style == "odds":
+        text = f"{odds[action].win * 100:.0f}%"
+        return paint(text, BOLD, YELLOW) if action == best else text
+    if style == "ev":
+        return chips(odds[action].ev * bet)
+    gap = odds[best].ev - odds[action].ev  # в долях ставки
+    if action == best:
+        return paint("лучший", BOLD, YELLOW)
+    if gap < 0.02:
+        return paint("тоже ок", GREEN)
+    if gap < 0.15:
+        return paint("хуже", ORANGE)
+    return paint("ошибка", RED)
 
 
 def key_label(key: str) -> str:
@@ -462,12 +520,12 @@ def intro_lines(game: Game, width: int) -> list[str]:
         "удвоить можно на любых двух картах, в том числе после сплита",
         f"пару можно разделить, всего до {MAX_HANDS} рук; тузы после сплита получают по одной карте",
         f"дилер {name}: {about}",
-        "совет (?) показывает, сколько фишек в среднем приносит каждый ход; "
-        "минус значит, что в среднем вы теряете",
     ]
     lines = ["", "  Сделайте ставку, чтобы начать.", "", paint("  Правила", BOLD)]
     for rule in rules:
         lines += textwrap.wrap(rule, width - 2, initial_indent="  • ", subsequent_indent="    ")
+    lines += ["", paint("  Совет", BOLD) + " (?) — лучший ход и оценка остальных. Вид меняется клавишей T:"]
+    lines += [f"  • {style} — {about}" for style, _, about in HINT_STYLES.values()]
     lines += ["", paint("  H — ещё, S — хватит, D — удвоить, P — разделить, ? — совет, Q — выход", DIM)]
     return lines
 
@@ -516,6 +574,7 @@ KEYMAP = {
     "q": "q", "й": "q",
     "y": "y", "н": "y",
     "n": "n", "т": "n",
+    "t": "t", "е": "t",
     "?": "?", "/": "?", ",": "?", ".": "?",
     "\n": "enter", "\r": "enter", " ": "enter",
 }
@@ -571,9 +630,10 @@ class Keyboard:
 # ─── Интерфейс ───────────────────────────────────────────────────────────
 
 class TerminalUI:
-    def __init__(self, keyboard: Keyboard, hints=False):
+    def __init__(self, keyboard: Keyboard, hints=False, hint_style="words"):
         self.kb = keyboard
         self.hints = hints
+        self.hint_style = hint_style
         self.last_bet = 50
         self.screen = sys.stdout.isatty()
 
@@ -601,16 +661,23 @@ class TerminalUI:
                 return key
             if key == "?":
                 hint = self.hint(game, hand, actions)
+            elif key == "t":  # следующий вид совета — и сразу показать его
+                styles = list(HINT_STYLES)
+                self.hint_style = styles[(styles.index(self.hint_style) + 1) % len(styles)]
+                hint = self.hint(game, hand, actions)
             elif key == "q" and self.confirm(game, "Выйти из игры? Ставка на столе сгорит."):
                 raise Quit
 
     def hint(self, game: Game, hand: Hand, actions) -> list[str]:
-        """Лучший ход и сколько фишек в среднем приносит каждый ход при текущей ставке."""
-        ev = advise(hand, game.dealer.cards[0], game.mode, game.shoe.counts(), actions)
-        ranked = sorted(ev, key=ev.get, reverse=True)
-        details = " · ".join(f"{ACTIONS[a]} {chips(ev[a] * hand.bet)}" for a in ranked)
-        return [f"  💡 Совет: {paint(ACTIONS[ranked[0]].upper(), BOLD, YELLOW)}",
-                f"     {paint('в среднем за раздачу:', DIM)} {details}"]
+        """Лучший ход и оценка каждого хода в выбранном виде."""
+        odds = advise(hand, game.dealer.cards[0], game.mode, game.shoe.counts(), actions)
+        best = max(odds, key=lambda a: odds[a].ev)
+        name, label, _ = HINT_STYLES[self.hint_style]
+        details = " · ".join(f"{ACTIONS[a]} {rating(odds, a, self.hint_style, hand.bet)}"
+                             for a in ACTIONS if a in odds)
+        return [f"  💡 Совет: {paint(ACTIONS[best].upper(), BOLD, YELLOW)}      "
+                f"{key_label('T')} {paint('вид: ' + name, DIM)}",
+                f"     {paint(label, DIM)} {details}"]
 
     def confirm(self, game: Game, question: str) -> bool:
         self.show(game, footer=[f"  {question}   {key_label('Y')} да   {key_label('N')} нет"])
@@ -663,6 +730,9 @@ def main():
     parser.add_argument("--decks", type=int, default=6, help="колод в шузе, 1–8 (по умолчанию 6)")
     parser.add_argument("--bank", type=int, default=1000, help="стартовый банк (по умолчанию 1000)")
     parser.add_argument("--hints", action="store_true", help="показывать совет на каждом ходу")
+    parser.add_argument("--hint-style", choices=HINT_STYLES, default="words",
+                        help="вид совета: words — словами (по умолчанию), odds — шансы, "
+                             "ev — матожидание; в игре меняется клавишей T")
     args = parser.parse_args()
     if not 1 <= args.decks <= 8:
         parser.error("--decks: от 1 до 8")
@@ -673,7 +743,7 @@ def main():
         os.system("")  # включает ANSI-цвета в консоли Windows
     screen = sys.stdout.isatty()
     with Keyboard() as kb:
-        ui = TerminalUI(kb, hints=args.hints)
+        ui = TerminalUI(kb, hints=args.hints, hint_style=args.hint_style)
         game = Game(ui, args.dealer, args.decks, args.bank)
         if screen:
             sys.stdout.write("\033[?1049h\033[?25l")  # отдельный экран, без курсора
