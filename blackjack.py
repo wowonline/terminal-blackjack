@@ -391,8 +391,12 @@ def signed(x) -> str:
     return ("+" if x > 0 else "−" if x < 0 else "") + money(abs(x))
 
 
-def percent(x) -> str:
-    return f"{x * 100:+.0f}%".replace("-", "−")
+def chips(x) -> str:
+    """Средний выигрыш в фишках: +3.0 зелёным, −2.1 красным."""
+    digits = 2 if abs(x) < 1 else 1 if abs(x) < 10 else 0
+    if not round(x, digits):
+        return paint("0", DIM)
+    return paint(f"{x:+.{digits}f}".replace("-", "−"), GREEN if x > 0 else RED)
 
 
 def key_label(key: str) -> str:
@@ -458,6 +462,8 @@ def intro_lines(game: Game, width: int) -> list[str]:
         "удвоить можно на любых двух картах, в том числе после сплита",
         f"пару можно разделить, всего до {MAX_HANDS} рук; тузы после сплита получают по одной карте",
         f"дилер {name}: {about}",
+        "совет (?) показывает, сколько фишек в среднем приносит каждый ход; "
+        "минус значит, что в среднем вы теряете",
     ]
     lines = ["", "  Сделайте ставку, чтобы начать.", "", paint("  Правила", BOLD)]
     for rule in rules:
@@ -587,9 +593,9 @@ class TerminalUI:
             print("\n".join(lines))
 
     def choose(self, game: Game, hand: Hand, actions) -> str:
-        hint = self.hint(game, hand, actions) if self.hints else None
+        hint = self.hint(game, hand, actions) if self.hints else []
         while True:
-            self.show(game, footer=[hint, controls(actions)] if hint else [controls(actions)])
+            self.show(game, footer=hint + [controls(actions)])
             key = KEYMAP.get(self.kb.key().lower())
             if key in actions:
                 return key
@@ -598,11 +604,13 @@ class TerminalUI:
             elif key == "q" and self.confirm(game, "Выйти из игры? Ставка на столе сгорит."):
                 raise Quit
 
-    def hint(self, game: Game, hand: Hand, actions) -> str:
+    def hint(self, game: Game, hand: Hand, actions) -> list[str]:
+        """Лучший ход и сколько фишек в среднем приносит каждый ход при текущей ставке."""
         ev = advise(hand, game.dealer.cards[0], game.mode, game.shoe.counts(), actions)
         ranked = sorted(ev, key=ev.get, reverse=True)
-        details = " · ".join(f"{ACTIONS[a]} {percent(ev[a])}" for a in ranked)
-        return f"  💡 Совет: {paint(ACTIONS[ranked[0]].upper(), BOLD, YELLOW)}   " + paint(f"({details})", DIM)
+        details = " · ".join(f"{ACTIONS[a]} {chips(ev[a] * hand.bet)}" for a in ranked)
+        return [f"  💡 Совет: {paint(ACTIONS[ranked[0]].upper(), BOLD, YELLOW)}",
+                f"     {paint('в среднем за раздачу:', DIM)} {details}"]
 
     def confirm(self, game: Game, question: str) -> bool:
         self.show(game, footer=[f"  {question}   {key_label('Y')} да   {key_label('N')} нет"])
