@@ -38,7 +38,7 @@ uv tool install git+https://github.com/wowonline/terminal-blackjack
 pipx install git+https://github.com/wowonline/terminal-blackjack
 ```
 
-После этого в `PATH` появится команда `blackjack`.
+После этого в `PATH` появится команда `blackjack`. Если терминал её не находит, выполните `uv tool update-shell` (или `pipx ensurepath`) и откройте новое окно.
 
 <details>
 <summary>Без uv и pipx: это один файл</summary>
