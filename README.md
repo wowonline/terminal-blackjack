@@ -1,6 +1,6 @@
-# 🃏 blackjack
+# 🃏 terminal-blackjack
 
-Блэкджек в терминале. Большие карты с цветными мастями, управление одной клавишей, подсказки и дилер, который играет оптимально.
+Блэкджек в терминале, запускается командой `blackjack`. Большие карты с цветными мастями, управление одной клавишей, подсказки и дилер, который играет оптимально.
 
 ```
   ДИЛЕР  10 + ?
@@ -29,13 +29,13 @@
 С [uv](https://docs.astral.sh/uv/):
 
 ```sh
-uv tool install git+https://github.com/wowonline/blackjack
+uv tool install git+https://github.com/wowonline/terminal-blackjack
 ```
 
 или с [pipx](https://pipx.pypa.io/):
 
 ```sh
-pipx install git+https://github.com/wowonline/blackjack
+pipx install git+https://github.com/wowonline/terminal-blackjack
 ```
 
 После этого в `PATH` появится команда `blackjack`.
@@ -44,7 +44,7 @@ pipx install git+https://github.com/wowonline/blackjack
 <summary>Без uv и pipx: это один файл</summary>
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/wowonline/blackjack/main/blackjack.py -o ~/.local/bin/blackjack
+curl -fsSL https://raw.githubusercontent.com/wowonline/terminal-blackjack/main/blackjack.py -o ~/.local/bin/blackjack
 chmod +x ~/.local/bin/blackjack
 ```
 
