@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "blackjack"
+version = "1.0.0"
+description = "Блэкджек в терминале: умный дилер, подсказки, карты с мастями"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.9"
+authors = [{ name = "wowonline" }]
+classifiers = [
+    "Environment :: Console",
+    "Topic :: Games/Entertainment",
+    "Programming Language :: Python :: 3",
+]
+
+[project.urls]
+Homepage = "https://github.com/wowonline/blackjack"
+
+[project.scripts]
+blackjack = "blackjack:main"
+
+[tool.setuptools]
+py-modules = ["blackjack"]
